@@ -7,6 +7,11 @@ project(SIPp)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+SET(CMAKE_BUILD_TYPE "Debug") 
+SET(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g -ggdb")
+SET(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall")
+
+
 if(EXISTS ./gmock/CMakeLists.txt)
   add_subdirectory(gmock EXCLUDE_FROM_ALL)
 endif()
