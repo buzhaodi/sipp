@@ -514,6 +514,7 @@ void call::init(scenario * call_scenario, SIPpSocket *socket, struct sockaddr_st
     memset(&(play_args_i.from), 0, sizeof(struct sockaddr_storage));
     memset(&(play_args_v.from), 0, sizeof(struct sockaddr_storage));
     hasMediaInformation = 0;
+    media_thread = 0;
     media_thread_a = 0;
     media_thread_i = 0;
     media_thread_v = 0;
@@ -642,17 +643,28 @@ call::~call()
     }
 
 # ifdef PCAPPLAY
+
+    if (media_thread != 0) {
+        pthread_cancel(media_thread);
+        pthread_join(media_thread, NULL);
+        }
+
+
     if (media_thread_a != 0) {
+
+ 
         pthread_cancel(media_thread_a);
         pthread_join(media_thread_a, NULL);
         media_thread_a = 0;
     }
     if (media_thread_i != 0) {
+  
         pthread_cancel(media_thread_i);
         pthread_join(media_thread_i, NULL);
         media_thread_i = 0;
     }
     if (media_thread_v != 0) {
+
         pthread_cancel(media_thread_v);
         pthread_join(media_thread_v, NULL);
         media_thread_v = 0;
@@ -3733,19 +3745,18 @@ call::T_ActionResult call::executeAction(const char* msg, message* curmsg)
 #ifdef PCAPPLAY
         } else if ((currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_AUDIO) ||
                    (currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_IMAGE) ||
-                   (currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_VIDEO) ||
                    (currentAction->getActionType() == CAction::E_AT_PLAY_DTMF)) {
             play_args_t* play_args = 0;
-            pthread_t& media_thread = media_thread_a;
+
             if ((currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_AUDIO) ||
                 (currentAction->getActionType() == CAction::E_AT_PLAY_DTMF)) {
                 play_args = &(this->play_args_a);
             } else if (currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_IMAGE) {
                 play_args = &(this->play_args_i);
-                media_thread = media_thread_i;
+                // media_thread = media_thread_i;
             } else if (currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_VIDEO) {
                 play_args = &(this->play_args_v);
-                media_thread = media_thread_v;
+                // media_thread = media_thread_v;
             } else {
                 ERROR("Can't find pcap data to play");
             }
@@ -3756,16 +3767,21 @@ call::T_ActionResult call::executeAction(const char* msg, message* curmsg)
                 pthread_cancel(media_thread);
                 pthread_join(media_thread, NULL);
                 media_thread = 0;
+    
             }
+
+
 
             if (currentAction->getActionType() == CAction::E_AT_PLAY_DTMF) {
                 char* digits = createSendingMessage(currentAction->getMessage(), -2 /* do not add crlf */);
                 play_args->pcap = (pcap_pkts *) malloc(sizeof(pcap_pkts));
                 play_args->last_seq_no += parse_dtmf_play_args(digits, play_args->pcap, play_args->last_seq_no);
                 play_args->free_pcap_when_done = 1;
+       
             } else {
                 play_args->pcap = currentAction->getPcapPkts();
                 play_args->free_pcap_when_done = 0;
+  
             }
 
             /* port number is set in [auto_]media_port interpolation */
@@ -3784,6 +3800,7 @@ call::T_ActionResult call::executeAction(const char* msg, message* curmsg)
 #ifndef PTHREAD_STACK_MIN
 #define PTHREAD_STACK_MIN  16384
 #endif
+
             int ret = pthread_create(&media_thread, &attr, send_wrapper, play_args);
             if (ret) {
                 ERROR("Can't create thread to send RTP packets");
@@ -3792,7 +3809,69 @@ call::T_ActionResult call::executeAction(const char* msg, message* curmsg)
 #endif
 
 #ifdef RTP_STREAM
-        } else if (currentAction->getActionType() == CAction::E_AT_RTP_ECHO) {
+        }else if(currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_VIDEO){
+
+
+
+            play_args_t* play_args_v = &(this->play_args_v);
+  
+
+            // existing media thread could be using play_args, so we have to kill it before modifying parameters
+            if (media_thread_v != 0) {
+                // If a media_thread is already active, kill it before starting a new one
+                pthread_cancel(media_thread_v);
+                pthread_join(media_thread_v, NULL);
+                media_thread_v = 0;
+
+            }
+
+                play_args_v->pcap = currentAction->getPcapPkts();
+                play_args_v->free_pcap_when_done = 0;
+  
+            /* port number is set in [auto_]media_port interpolation */
+            if (media_ip_is_ipv6) {
+                struct sockaddr_in6* from = (struct sockaddr_in6*) &(play_args_v->from);
+                from->sin6_family = AF_INET6;
+                inet_pton(AF_INET6, media_ip, &(from->sin6_addr));
+            } else {
+                struct sockaddr_in* from = (struct sockaddr_in*) &(play_args_v->from);
+                from->sin_family = AF_INET;
+                from->sin_addr.s_addr = inet_addr(media_ip);
+            }
+            /* Create a thread to send RTP or UDPTL packets */
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+#ifndef PTHREAD_STACK_MIN
+#define PTHREAD_STACK_MIN  16384
+#endif
+
+            int ret = pthread_create(&media_thread_v, &attr, send_wrapper, play_args_v);
+            if (ret) {
+                ERROR("Can't create thread to send RTP packets");
+            }
+            pthread_attr_destroy(&attr);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        }        
+        else if (currentAction->getActionType() == CAction::E_AT_RTP_ECHO) {
             rtp_echo_state = (currentAction->getDoubleValue() != 0);
         } else if (currentAction->getActionType() == CAction::E_AT_RTP_STREAM_PAUSE) {
             rtpstream_pause(&rtpstream_callinfo);
@@ -3954,7 +4033,7 @@ bool call::automaticResponseMode(T_AutoMode P_case, const char* P_recv)
         // The BYE is unexpected, count it
         call_scenario->messages[msg_index] -> nb_unexp++;
         if (default_behaviors & DEFAULT_BEHAVIOR_ABORTUNEXP) {
-            WARNING("Aborting call on an unexpected BYE for call: %s", (id==NULL)?"none":id);
+            WARNING("Aborting call on an unexpected BYE for call: %s \n", (id==NULL)?"none":id);
             if (default_behaviors & DEFAULT_BEHAVIOR_BYE) {
                 sendBuffer(createSendingMessage(get_default_message("200"), -1));
             }
@@ -3992,7 +4071,7 @@ bool call::automaticResponseMode(T_AutoMode P_case, const char* P_recv)
         // The CANCEL is unexpected, count it
         call_scenario->messages[msg_index] -> nb_unexp++;
         if (default_behaviors & DEFAULT_BEHAVIOR_ABORTUNEXP) {
-            WARNING("Aborting call on an unexpected CANCEL for call: %s", (id==NULL)?"none":id);
+            WARNING("Aborting call on an unexpected CANCEL for call: %s \n", (id==NULL)?"none":id);
             if (default_behaviors & DEFAULT_BEHAVIOR_BYE) {
                 sendBuffer(createSendingMessage(get_default_message("200"), -1));
             }

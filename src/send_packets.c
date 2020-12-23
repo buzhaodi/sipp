@@ -164,7 +164,13 @@ void send_packets_pcap_cleanup(void* arg)
     play_args_t* play_args = arg;
 
     if (play_args->free_pcap_when_done) {
+
+        pthread_t pthread_self();
+
+        WARNING("end media_thread is %02x pcap is %p, len is %d \n",pthread_self(),play_args->pcap,sizeof(play_args->pcap));
+        
         free(play_args->pcap);
+
         play_args->pcap = NULL;
     }
 }
@@ -303,7 +309,7 @@ void send_packets(play_args_t* play_args)
         }
 #endif
         if (ret < 0) {
-            WARNING("send_packets.c: sendto failed with error: %s", strerror(errno));
+            WARNING("send_packets.c: sendto failed with error: %s\n", strerror(errno));
             goto pop1;
         }
 
